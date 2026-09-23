@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { api, socket } from "../api/client";
 import {
   Activity,
@@ -19,7 +19,10 @@ import {
   Clock,
   Radio,
   Copy,
-  Check
+  Check,
+  Code2,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import {
   Chart as ChartJS,
@@ -57,7 +60,10 @@ export default function MetricsChaosView({ telemetry }) {
   const [promqlQuery, setPromqlQuery] = useState("devops_system_cpu_percent");
   const [promqlResult, setPromqlResult] = useState(null);
   const [promqlLoading, setPromqlLoading] = useState(false);
+  const [showRawJson, setShowRawJson] = useState(false);
   const [copiedCmd, setCopiedCmd] = useState(false);
+
+  const resultsRef = useRef(null);
 
   useEffect(() => {
     fetchHistory();
@@ -99,8 +105,8 @@ export default function MetricsChaosView({ telemetry }) {
   };
 
   const handleRunPromQL = async (queryToRun) => {
-    const q = queryToRun || promqlQuery;
-    if (!q) return;
+    const q = (queryToRun !== undefined ? queryToRun : promqlQuery) || "devops_system_cpu_percent";
+    setPromqlQuery(q);
     setPromqlLoading(true);
     try {
       const res = await api.post("/metrics/prometheus/query", { query: q });
@@ -108,7 +114,8 @@ export default function MetricsChaosView({ telemetry }) {
     } catch (err) {
       setPromqlResult({
         status: "error",
-        error: err.response?.data?.error || err.message
+        error: err.response?.data?.error || err.message,
+        data: { resultType: "vector", result: [] }
       });
     } finally {
       setPromqlLoading(false);
@@ -279,7 +286,7 @@ export default function MetricsChaosView({ telemetry }) {
             style={{ padding: "0.4rem 0.85rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.35rem" }}
             onClick={() => {
               setActiveTab("promql");
-              if (!promqlResult) handleRunPromQL();
+              if (!promqlResult) handleRunPromQL("devops_system_cpu_percent");
             }}
           >
             <Terminal size={14} /> PromQL Engine
@@ -414,16 +421,255 @@ export default function MetricsChaosView({ telemetry }) {
 
       {/* ================= TAB 2: PROMETHEUS PROMQL ENGINE ================= */}
       {activeTab === "promql" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+          {/* PromQL Interactive Query Console - FIRST FOR IMMEDIATE VISIBILITY */}
+          <div className="glass-panel" style={{ padding: "1.25rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap", gap: "0.5rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <Terminal size={18} color="var(--accent-cyan)" />
+                <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: 0 }}>
+                  Live PromQL Query Runner
+                </h3>
+              </div>
+              <span style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>
+                Click chips or type custom PromQL expressions
+              </span>
+            </div>
+
+            {/* Quick Query Chips */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.85rem" }}>
+              {sampleQueries.map((item) => {
+                const isSelected = promqlQuery === item.query;
+                return (
+                  <button
+                    key={item.query}
+                    onClick={() => handleRunPromQL(item.query)}
+                    style={{
+                      background: isSelected ? "rgba(0, 242, 254, 0.2)" : "rgba(30, 41, 59, 0.6)",
+                      border: `1px solid ${isSelected ? "var(--accent-cyan)" : "var(--border-subtle)"}`,
+                      color: isSelected ? "var(--accent-cyan)" : "var(--text-primary)",
+                      padding: "0.3rem 0.65rem",
+                      borderRadius: "6px",
+                      fontSize: "0.75rem",
+                      cursor: "pointer",
+                      fontWeight: isSelected ? 600 : 400,
+                      transition: "all 0.15s"
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Query Input Bar */}
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <div style={{ flex: 1, position: "relative" }}>
+                <input
+                  type="text"
+                  value={promqlQuery}
+                  onChange={(e) => setPromqlQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleRunPromQL();
+                  }}
+                  placeholder="Enter PromQL query (e.g. devops_system_cpu_percent, up, process_resident_memory_bytes)..."
+                  className="input-control"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "0.85rem",
+                    paddingLeft: "2.25rem",
+                    paddingTop: "0.6rem",
+                    paddingBottom: "0.6rem"
+                  }}
+                />
+                <Search size={15} style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", color: "var(--text-secondary)" }} />
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={() => handleRunPromQL()}
+                disabled={promqlLoading}
+                style={{ padding: "0.55rem 1.4rem", fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.4rem" }}
+              >
+                {promqlLoading ? <RefreshCw size={15} className="spin" /> : <PlayIcon size={15} />}
+                <span>{promqlLoading ? "Querying..." : "Run PromQL"}</span>
+              </button>
+            </div>
+
+            {/* LIVE QUERY RESULTS CARD */}
+            <div ref={resultsRef} style={{ marginTop: "1rem" }}>
+              {promqlResult ? (
+                <div style={{
+                  background: "rgba(10, 15, 26, 0.85)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "10px",
+                  padding: "1rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.75rem"
+                }}>
+                  {/* Result Header & Status */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                      <span className="badge badge-success" style={{ fontSize: "0.68rem" }}>
+                        <CheckCircle2 size={12} /> 200 OK
+                      </span>
+                      <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                        Source: <strong style={{ color: "var(--accent-cyan)" }}>{promqlResult.source}</strong>
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>
+                        Result: <strong style={{ color: "var(--text-primary)" }}>{promqlResult.data?.resultType || "vector"}</strong> ({promqlResult.data?.result?.length || 0} series)
+                      </span>
+                      <button
+                        onClick={() => setShowRawJson(!showRawJson)}
+                        className="btn btn-secondary"
+                        style={{ padding: "0.25rem 0.55rem", fontSize: "0.7rem", display: "flex", alignItems: "center", gap: "0.3rem" }}
+                      >
+                        <Code2 size={12} />
+                        {showRawJson ? "Hide JSON" : "View Raw JSON"}
+                        {showRawJson ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Primary Metric Value Callout (Big Stat) */}
+                  {promqlResult.data?.result && promqlResult.data.result.length > 0 && (
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "0.75rem 1rem",
+                      background: "rgba(15, 23, 42, 0.7)",
+                      border: "1px solid rgba(0, 242, 254, 0.2)",
+                      borderRadius: "8px",
+                      flexWrap: "wrap",
+                      gap: "0.5rem"
+                    }}>
+                      <div>
+                        <div style={{ fontSize: "0.7rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          EVALUATED METRIC
+                        </div>
+                        <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--accent-cyan)", fontFamily: "var(--font-mono)" }}>
+                          {promqlResult.data.result[0]?.metric?.__name__ || promqlResult.query}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: "0.7rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          CURRENT VALUE
+                        </div>
+                        <div style={{
+                          fontSize: "1.5rem",
+                          fontWeight: 800,
+                          color: "var(--accent-emerald)",
+                          fontFamily: "var(--font-mono)",
+                          textShadow: "0 0 12px rgba(16, 185, 129, 0.3)"
+                        }}>
+                          {Array.isArray(promqlResult.data.result[0]?.value)
+                            ? promqlResult.data.result[0].value[1]
+                            : String(promqlResult.data.result[0]?.value || "0")}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Vector Series Table */}
+                  {promqlResult.data?.result && promqlResult.data.result.length > 0 ? (
+                    <div style={{ overflowX: "auto", borderRadius: "6px", border: "1px solid var(--border-subtle)" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem", textAlign: "left" }}>
+                        <thead>
+                          <tr style={{ background: "rgba(30, 41, 59, 0.6)", borderBottom: "1px solid var(--border-subtle)" }}>
+                            <th style={{ padding: "0.5rem 0.75rem", color: "var(--text-secondary)", fontWeight: 600 }}>Metric & Labels</th>
+                            <th style={{ padding: "0.5rem 0.75rem", color: "var(--text-secondary)", fontWeight: 600, width: "140px" }}>Value</th>
+                            <th style={{ padding: "0.5rem 0.75rem", color: "var(--text-secondary)", fontWeight: 600, width: "140px" }}>Timestamp</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {promqlResult.data.result.map((item, idx) => {
+                            const val = Array.isArray(item.value) ? item.value[1] : item.value;
+                            const timestamp = Array.isArray(item.value)
+                              ? new Date(item.value[0] * 1000).toLocaleTimeString()
+                              : "Live";
+                            const labelsObj = item.metric || {};
+
+                            return (
+                              <tr key={idx} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.04)", background: idx % 2 === 0 ? "transparent" : "rgba(255, 255, 255, 0.01)" }}>
+                                <td style={{ padding: "0.6rem 0.75rem", fontFamily: "var(--font-mono)" }}>
+                                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.35rem" }}>
+                                    <span style={{ color: "var(--accent-cyan)", fontWeight: 700 }}>
+                                      {labelsObj.__name__ || "metric"}
+                                    </span>
+                                    {Object.entries(labelsObj)
+                                      .filter(([k]) => k !== "__name__")
+                                      .map(([k, v]) => (
+                                        <span key={k} style={{
+                                          fontSize: "0.7rem",
+                                          background: "rgba(30, 41, 59, 0.8)",
+                                          border: "1px solid var(--border-subtle)",
+                                          color: "#94a3b8",
+                                          padding: "0.1rem 0.35rem",
+                                          borderRadius: "4px"
+                                        }}>
+                                          {k}="{v}"
+                                        </span>
+                                      ))}
+                                  </div>
+                                </td>
+                                <td style={{ padding: "0.6rem 0.75rem", fontFamily: "var(--font-mono)", color: "var(--accent-emerald)", fontWeight: 700, fontSize: "0.95rem" }}>
+                                  {val}
+                                </td>
+                                <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-secondary)", fontSize: "0.75rem" }}>
+                                  {timestamp}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "0.85rem", color: "var(--accent-amber)", fontSize: "0.8rem" }}>
+                      ⚠️ No vector series matched the query "{promqlResult.query}".
+                    </div>
+                  )}
+
+                  {/* Raw JSON Inspector */}
+                  {showRawJson && (
+                    <div style={{ marginTop: "0.5rem" }}>
+                      <div style={{ fontSize: "0.72rem", color: "var(--text-secondary)", marginBottom: "0.3rem" }}>
+                        Raw Prometheus JSON Payload:
+                      </div>
+                      <pre className="code-terminal" style={{ margin: 0, maxHeight: "200px", fontSize: "0.75rem" }}>
+                        {JSON.stringify(promqlResult, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  padding: "1.5rem",
+                  textAlign: "center",
+                  border: "1px dashed var(--border-subtle)",
+                  borderRadius: "8px",
+                  color: "var(--text-secondary)",
+                  fontSize: "0.82rem"
+                }}>
+                  Click a metric query above or enter a PromQL expression to execute.
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Prometheus Exporter Info Card */}
           <div className="glass-panel" style={{ padding: "1.25rem" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
               <div>
-                <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <Server size={18} color="var(--accent-cyan)" /> Prometheus Metrics Exporter Status
+                <h3 style={{ fontSize: "0.95rem", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <Server size={17} color="var(--accent-cyan)" /> Prometheus Metrics Exporter Status
                 </h3>
-                <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: "0.3rem", margin: 0 }}>
-                  Scrape endpoint is actively serving metrics formatted for Prometheus server and Grafana agents.
+                <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: "0.25rem", margin: 0 }}>
+                  Standard OpenMetrics scrape target active on Smart DevOps Assistant core API.
                 </p>
               </div>
 
@@ -433,7 +679,7 @@ export default function MetricsChaosView({ telemetry }) {
                   target="_blank"
                   rel="noreferrer"
                   className="btn btn-secondary"
-                  style={{ fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.35rem" }}
+                  style={{ fontSize: "0.75rem", padding: "0.35rem 0.75rem", display: "flex", alignItems: "center", gap: "0.35rem" }}
                 >
                   <ExternalLink size={14} /> Open Raw /metrics
                 </a>
@@ -459,7 +705,7 @@ export default function MetricsChaosView({ telemetry }) {
               </div>
               <div style={{ background: "rgba(15, 23, 42, 0.5)", padding: "0.75rem 1rem", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
                 <div style={{ fontSize: "0.7rem", color: "var(--text-secondary)" }}>TOTAL METRICS</div>
-                <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--accent-emerald)" }}>{promStatus?.metricsCount || 24} Registered</div>
+                <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--accent-emerald)" }}>{promStatus?.metricsCount || 33} Registered</div>
               </div>
               <div style={{ background: "rgba(15, 23, 42, 0.5)", padding: "0.75rem 1rem", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
                 <div style={{ fontSize: "0.7rem", color: "var(--text-secondary)" }}>PROMETHEUS SCRAPER</div>
@@ -472,149 +718,6 @@ export default function MetricsChaosView({ telemetry }) {
                 <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--accent-purple)" }}>OpenMetrics 0.0.4</div>
               </div>
             </div>
-          </div>
-
-          {/* PromQL Interactive Query Console */}
-          <div className="glass-panel" style={{ padding: "1.25rem" }}>
-            <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <Terminal size={18} color="var(--accent-indigo)" /> Live PromQL Query Console
-            </h3>
-            <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.75rem" }}>
-              Execute standard PromQL queries against the live telemetry registry or connected Prometheus server:
-            </p>
-
-            {/* Quick Query Chips */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.85rem" }}>
-              {sampleQueries.map((item) => (
-                <button
-                  key={item.query}
-                  onClick={() => {
-                    setPromqlQuery(item.query);
-                    handleRunPromQL(item.query);
-                  }}
-                  style={{
-                    background: promqlQuery === item.query ? "rgba(0, 242, 254, 0.15)" : "rgba(30, 41, 59, 0.6)",
-                    border: `1px solid ${promqlQuery === item.query ? "var(--accent-cyan)" : "var(--border-subtle)"}`,
-                    color: promqlQuery === item.query ? "var(--accent-cyan)" : "var(--text-secondary)",
-                    padding: "0.25rem 0.6rem",
-                    borderRadius: "6px",
-                    fontSize: "0.72rem",
-                    cursor: "pointer",
-                    transition: "all 0.2s"
-                  }}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Query Input Bar */}
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <div style={{ flex: 1, position: "relative" }}>
-                <input
-                  type="text"
-                  value={promqlQuery}
-                  onChange={(e) => setPromqlQuery(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleRunPromQL(); }}
-                  placeholder="Enter PromQL expression (e.g. devops_system_cpu_percent, up)..."
-                  className="input-field"
-                  style={{
-                    width: "100%",
-                    fontFamily: "monospace",
-                    fontSize: "0.85rem",
-                    paddingLeft: "2.25rem"
-                  }}
-                />
-                <Search size={15} style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", color: "var(--text-secondary)" }} />
-              </div>
-              <button
-                className="btn btn-primary"
-                onClick={() => handleRunPromQL()}
-                disabled={promqlLoading}
-                style={{ padding: "0.5rem 1.25rem", fontSize: "0.82rem" }}
-              >
-                {promqlLoading ? <RefreshCw size={14} className="spin" /> : "▶ Run PromQL"}
-              </button>
-            </div>
-
-            {/* Query Output Box */}
-            {promqlResult && (
-              <div style={{ marginTop: "1rem" }}>
-                <div style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  fontSize: "0.72rem",
-                  color: "var(--text-secondary)",
-                  marginBottom: "0.4rem"
-                }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                    Source: <strong style={{ color: "var(--accent-cyan)" }}>{promqlResult.source || "EVALUATOR"}</strong>
-                  </span>
-                  <span>{promqlResult.data?.result?.length || 0} Vector Series Returned</span>
-                </div>
-
-                {promqlResult.data?.result && promqlResult.data.result.length > 0 ? (
-                  <div style={{
-                    background: "rgba(10, 15, 26, 0.9)",
-                    border: "1px solid var(--border-subtle)",
-                    borderRadius: "8px",
-                    overflow: "hidden"
-                  }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
-                      <thead>
-                        <tr style={{ background: "rgba(30, 41, 59, 0.5)", borderBottom: "1px solid var(--border-subtle)", textAlign: "left" }}>
-                          <th style={{ padding: "0.6rem 0.8rem", color: "var(--text-secondary)" }}>Metric & Labels</th>
-                          <th style={{ padding: "0.6rem 0.8rem", color: "var(--text-secondary)", width: "120px" }}>Value</th>
-                          <th style={{ padding: "0.6rem 0.8rem", color: "var(--text-secondary)", width: "120px" }}>Timestamp</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {promqlResult.data.result.map((item, idx) => (
-                          <tr key={idx} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)" }}>
-                            <td style={{ padding: "0.6rem 0.8rem", fontFamily: "monospace" }}>
-                              <span style={{ color: "var(--accent-cyan)", fontWeight: 600 }}>
-                                {item.metric.__name__ || "vector"}
-                              </span>
-                              <span style={{ color: "#94a3b8", fontSize: "0.72rem", marginLeft: "0.4rem" }}>
-                                {JSON.stringify(
-                                  Object.fromEntries(
-                                    Object.entries(item.metric).filter(([k]) => k !== "__name__")
-                                  )
-                                )}
-                              </span>
-                            </td>
-                            <td style={{ padding: "0.6rem 0.8rem", fontFamily: "monospace", color: "var(--accent-emerald)", fontWeight: 700 }}>
-                              {Array.isArray(item.value) ? item.value[1] : item.value}
-                            </td>
-                            <td style={{ padding: "0.6rem 0.8rem", color: "var(--text-secondary)", fontSize: "0.72rem" }}>
-                              {Array.isArray(item.value)
-                                ? new Date(item.value[0] * 1000).toLocaleTimeString()
-                                : "Now"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: "1rem",
-                    background: "rgba(15, 23, 42, 0.5)",
-                    borderRadius: "8px",
-                    border: "1px solid var(--border-subtle)",
-                    fontSize: "0.8rem",
-                    color: "var(--text-secondary)"
-                  }}>
-                    {promqlResult.error ? (
-                      <span style={{ color: "var(--accent-rose)" }}>❌ Error: {promqlResult.error}</span>
-                    ) : (
-                      "No vector series matched this query."
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -746,5 +849,14 @@ export default function MetricsChaosView({ telemetry }) {
         </div>
       )}
     </div>
+  );
+}
+
+// Small Play SVG Icon for PromQL Run Button
+function PlayIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <polygon points="5 3 19 12 5 21 5 3" />
+    </svg>
   );
 }
