@@ -1,6 +1,7 @@
 import os from "os";
 import { dbRun, dbAll } from "../database/db.js";
 import { MonitoringAgent } from "../agents/monitoringAgent.js";
+import { PrometheusService } from "./prometheusService.js";
 
 /**
  * System Telemetry & Chaos Injection Service (Chapter 3.4.2 & Chapter 6.4)
@@ -78,6 +79,13 @@ export class MetricsService {
       activeTelemetry = { ...simulatedTelemetry };
     }
 
+    // Synchronize to Prometheus Registry
+    PrometheusService.updateTelemetryMetrics({
+      cpu: activeTelemetry.cpu,
+      memory: activeTelemetry.memory,
+      activePods: activeTelemetry.activePods
+    });
+
     const evaluation = MonitoringAgent.evaluateMetrics({
       cpuPercent: activeTelemetry.cpu,
       memoryPercent: activeTelemetry.memory,
@@ -133,6 +141,10 @@ export class MetricsService {
       simulatedTelemetry.cpu = 45.0;
       simulatedTelemetry.memory = 60.0;
       simulatedTelemetry.activePods = 4;
+    }
+
+    if (faultType !== "recover") {
+      PrometheusService.recordChaosFault(faultType);
     }
 
     return this.getCurrent();

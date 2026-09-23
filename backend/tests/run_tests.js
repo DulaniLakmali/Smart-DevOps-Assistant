@@ -3,19 +3,20 @@ import { LogAnalyzerAgent } from "../src/agents/logAnalyzerAgent.js";
 import { CIService } from "../src/services/ciService.js";
 import { GitHubService } from "../src/services/githubService.js";
 import { ExecutorAgent } from "../src/agents/executorAgent.js";
+import { PrometheusService } from "../src/services/prometheusService.js";
 import { dbGet, dbAll, dbRun } from "../src/database/db.js";
 import { seedDatabase } from "../src/database/seed.js";
 
 async function runAllTests() {
   console.log("\n=======================================================");
-  console.log("🧪 RUNNING CHAPTER 6 EVALUATION SUITE (TC001 - TC007)");
+  console.log("🧪 RUNNING CHAPTER 6 EVALUATION SUITE (TC001 - TC008)");
   console.log("=======================================================\n");
 
   await seedDatabase();
   const testUser = await dbGet("SELECT * FROM users WHERE role = 'devops_engineer'");
 
   let passedCount = 0;
-  let totalCount = 7;
+  let totalCount = 8;
 
   // --- TC001: User Query Processing ---
   console.log("▶ [TC001] Test User Query Processing ('Deploy the frontend to Kubernetes')");
@@ -129,6 +130,31 @@ async function runAllTests() {
       passedCount++;
     } else {
       console.error("  ❌ Failed: Remediation execution returned error or unexpected output");
+    }
+  } catch (err) {
+    console.error("  ❌ Failed:", err.message);
+  }
+
+  // --- TC008: Real Prometheus Telemetry Exporter & PromQL Engine ---
+  console.log("\n▶ [TC008] Test Real Prometheus Telemetry Exporter & PromQL Engine");
+  try {
+    // 1. Test /metrics exposition text format
+    const rawMetrics = await PrometheusService.getMetrics();
+    const hasCpuGauge = rawMetrics.includes("devops_system_cpu_percent");
+    const hasMemGauge = rawMetrics.includes("devops_system_memory_percent");
+
+    // 2. Test PromQL evaluation
+    const queryResult = await PrometheusService.queryPromQL("devops_system_cpu_percent");
+    const isVectorValid = queryResult.status === "success" && queryResult.data && Array.isArray(queryResult.data.result);
+
+    // 3. Test Prometheus status
+    const status = await PrometheusService.getStatus();
+
+    if (hasCpuGauge && hasMemGauge && isVectorValid && status.metricsCount > 0) {
+      console.log(`  ✅ Passed: Prometheus Exporter active (${status.metricsCount} metrics registered). PromQL evaluated successfully [Source: ${queryResult.source}].`);
+      passedCount++;
+    } else {
+      console.error("  ❌ Failed: Prometheus exposition or PromQL evaluation mismatch");
     }
   } catch (err) {
     console.error("  ❌ Failed:", err.message);

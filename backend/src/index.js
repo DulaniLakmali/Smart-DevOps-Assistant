@@ -5,6 +5,7 @@ import { Server } from "socket.io";
 import { config } from "./config/env.js";
 import { seedDatabase } from "./database/seed.js";
 import { MetricsService } from "./services/metricsService.js";
+import { PrometheusService } from "./services/prometheusService.js";
 
 // Routes
 import { createAssistantRouter } from "./routes/assistantRoutes.js";
@@ -33,6 +34,26 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+
+// Track HTTP requests with Prometheus Counter
+app.use((req, res, next) => {
+  res.on("finish", () => {
+    if (req.path !== "/metrics" && !req.path.startsWith("/socket.io")) {
+      PrometheusService.recordHttpRequest(req.method, req.route ? req.route.path : req.path, res.statusCode);
+    }
+  });
+  next();
+});
+
+// Standard Prometheus /metrics Scrape Target
+app.get("/metrics", async (req, res) => {
+  try {
+    res.set("Content-Type", PrometheusService.getContentType());
+    res.end(await PrometheusService.getMetrics());
+  } catch (err) {
+    res.status(500).end(err.message);
+  }
+});
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
