@@ -70,5 +70,41 @@ export const createGitHubRouter = () => {
     }
   });
 
+  // GET /api/github/repos/:owner/:repo/runs - Fetch workflow runs
+  router.get("/repos/:owner/:repo/runs", checkPermission("read"), async (req, res) => {
+    try {
+      const { owner, repo } = req.params;
+      const tokenHeader = req.headers["x-github-token"];
+      const runs = await GitHubService.getWorkflowRuns(owner, repo, tokenHeader);
+      res.json(runs);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/github/repos/:owner/:repo/runs/:runId/jobs - Fetch jobs for a run
+  router.get("/repos/:owner/:repo/runs/:runId/jobs", checkPermission("read"), async (req, res) => {
+    try {
+      const { owner, repo, runId } = req.params;
+      const tokenHeader = req.headers["x-github-token"];
+      const jobs = await GitHubService.getRunJobs(owner, repo, runId, tokenHeader);
+      res.json(jobs);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/github/repos/:owner/:repo/jobs/:jobId/logs - Fetch raw runner logs
+  router.get("/repos/:owner/:repo/jobs/:jobId/logs", checkPermission("read"), async (req, res) => {
+    try {
+      const { owner, repo, jobId } = req.params;
+      const tokenHeader = req.headers["x-github-token"];
+      const logs = await GitHubService.getJobLogs(owner, repo, jobId, tokenHeader);
+      res.type("text/plain").send(logs);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };

@@ -66,15 +66,51 @@ export const createDevOpsRouter = (io) => {
   });
 
   // --- CI/CD PIPELINES ---
-  router.get("/ci/pipelines", checkPermission("read"), (req, res) => {
-    res.json(CIService.getPipelines());
+  router.get("/ci/pipelines", checkPermission("read"), async (req, res) => {
+    try {
+      const { mode, owner, repo } = req.query;
+      const reqToken = req.headers["x-github-token"] || null;
+      const result = await CIService.getPipelines(mode, reqToken, owner, repo);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.post("/ci/trigger", checkPermission("trigger_ci"), async (req, res) => {
     try {
-      const { pipelineName } = req.body;
-      const newPipeline = await CIService.triggerPipeline(pipelineName, io);
+      const { pipelineName, mode, owner, repo, ref, workflowId } = req.body;
+      const reqToken = req.headers["x-github-token"] || null;
+      const newPipeline = await CIService.triggerPipeline(pipelineName, io, reqToken, {
+        mode,
+        owner,
+        repo,
+        ref,
+        workflowId
+      });
       res.json(newPipeline);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get("/ci/runs/:runId/jobs", checkPermission("read"), async (req, res) => {
+    try {
+      const { owner, repo } = req.query;
+      const reqToken = req.headers["x-github-token"] || null;
+      const jobs = await CIService.getRunJobs(req.params.runId, reqToken, owner, repo);
+      res.json(jobs);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get("/ci/jobs/:jobId/logs", checkPermission("read"), async (req, res) => {
+    try {
+      const { owner, repo } = req.query;
+      const reqToken = req.headers["x-github-token"] || null;
+      const logs = await CIService.getJobLogs(req.params.jobId, reqToken, owner, repo);
+      res.type("text/plain").send(logs);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

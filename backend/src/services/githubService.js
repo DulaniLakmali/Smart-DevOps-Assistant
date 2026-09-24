@@ -6,7 +6,9 @@ import { config } from "../config/env.js";
  * Connects directly to GitHub REST API to query repos, commits, and trigger GitHub Actions.
  */
 
-let configuredToken = process.env.GITHUB_TOKEN || "";
+let configuredToken = config.GITHUB_TOKEN || process.env.GITHUB_TOKEN || "";
+export const DEFAULT_OWNER = config.GITHUB_DEFAULT_OWNER || "DulaniLakmali";
+export const DEFAULT_REPO = config.GITHUB_DEFAULT_REPO || "Smart-DevOps-Assistant";
 
 export class GitHubService {
   static setToken(token) {
@@ -14,7 +16,7 @@ export class GitHubService {
   }
 
   static getToken(reqToken) {
-    return reqToken || configuredToken;
+    return reqToken || configuredToken || config.GITHUB_TOKEN || "";
   }
 
   static getHeaders(token) {
@@ -36,25 +38,36 @@ export class GitHubService {
 
     if (token) {
       try {
-        const res = await axios.get("https://api.github.com/user/repos?sort=updated&per_page=15", {
+        const res = await axios.get("https://api.github.com/user/repos?sort=updated&per_page=20", {
           headers: this.getHeaders(token),
           timeout: 8000
         });
 
+        const mapped = res.data.map((r) => ({
+          id: r.id,
+          name: r.name,
+          fullName: r.full_name,
+          owner: r.owner.login,
+          isPrivate: r.private,
+          description: r.description || "DevOps project repository",
+          stars: r.stargazers_count,
+          defaultBranch: r.default_branch,
+          htmlUrl: r.html_url,
+          language: r.language || "JavaScript"
+        }));
+
+        // Prioritize Smart-DevOps-Assistant and devops-ai-demo at the top
+        mapped.sort((a, b) => {
+          if (a.name === DEFAULT_REPO) return -1;
+          if (b.name === DEFAULT_REPO) return 1;
+          if (a.name === "devops-ai-demo") return -1;
+          if (b.name === "devops-ai-demo") return 1;
+          return 0;
+        });
+
         return {
           isLive: true,
-          repos: res.data.map((r) => ({
-            id: r.id,
-            name: r.name,
-            fullName: r.full_name,
-            owner: r.owner.login,
-            isPrivate: r.private,
-            description: r.description || "DevOps project repository",
-            stars: r.stargazers_count,
-            defaultBranch: r.default_branch,
-            htmlUrl: r.html_url,
-            language: r.language || "TypeScript"
-          }))
+          repos: mapped
         };
       } catch (err) {
         console.warn("GitHub API error with token, attempting public user repos:", err.message);
@@ -63,7 +76,7 @@ export class GitHubService {
 
     // Attempt to load live public repos for DulaniLakmali
     try {
-      const res = await axios.get("https://api.github.com/users/DulaniLakmali/repos?sort=updated&per_page=12", {
+      const res = await axios.get(`https://api.github.com/users/${DEFAULT_OWNER}/repos?sort=updated&per_page=12`, {
         headers: this.getHeaders(),
         timeout: 6000
       });
@@ -82,8 +95,7 @@ export class GitHubService {
           language: r.language || "JavaScript"
         }));
 
-        // Prioritize devops-ai-demo at the top
-        mapped.sort((a, b) => (a.name === "devops-ai-demo" ? -1 : b.name === "devops-ai-demo" ? 1 : 0));
+        mapped.sort((a, b) => (a.name === DEFAULT_REPO ? -1 : b.name === DEFAULT_REPO ? 1 : 0));
 
         return {
           isLive: true,
@@ -99,6 +111,18 @@ export class GitHubService {
       isLive: false,
       repos: [
         {
+          id: 954123,
+          name: DEFAULT_REPO,
+          fullName: `${DEFAULT_OWNER}/${DEFAULT_REPO}`,
+          owner: DEFAULT_OWNER,
+          isPrivate: false,
+          description: "Agentic AI-Powered Smart DevOps Assistant with Real CI/CD and Prometheus Observability",
+          stars: 2,
+          defaultBranch: "main",
+          htmlUrl: `https://github.com/${DEFAULT_OWNER}/${DEFAULT_REPO}`,
+          language: "JavaScript"
+        },
+        {
           id: 901234,
           name: "devops-ai-demo",
           fullName: "DulaniLakmali/devops-ai-demo",
@@ -109,30 +133,6 @@ export class GitHubService {
           defaultBranch: "main",
           htmlUrl: "https://github.com/DulaniLakmali/devops-ai-demo",
           language: "JavaScript"
-        },
-        {
-          id: 871231,
-          name: "microservices-payment-api",
-          fullName: "Horizon-Research/microservices-payment-api",
-          owner: "Horizon-Research",
-          isPrivate: true,
-          description: "High-throughput cloud-native payment processing microservice",
-          stars: 18,
-          defaultBranch: "main",
-          htmlUrl: "https://github.com/Horizon-Research/microservices-payment-api",
-          language: "Node.js"
-        },
-        {
-          id: 765432,
-          name: "infrastructure-terraform-k8s",
-          fullName: "Horizon-Research/infrastructure-terraform-k8s",
-          owner: "Horizon-Research",
-          isPrivate: true,
-          description: "Declarative Terraform and Kubernetes manifests for multi-cloud deployments",
-          stars: 25,
-          defaultBranch: "main",
-          htmlUrl: "https://github.com/Horizon-Research/infrastructure-terraform-k8s",
-          language: "HCL"
         }
       ]
     };
@@ -141,7 +141,7 @@ export class GitHubService {
   /**
    * Fetch recent commits for a repository
    */
-  static async getCommits(owner, repo, reqToken) {
+  static async getCommits(owner = DEFAULT_OWNER, repo = DEFAULT_REPO, reqToken) {
     const token = this.getToken(reqToken);
 
     try {
@@ -154,7 +154,7 @@ export class GitHubService {
         return res.data.map((c) => ({
           sha: c.sha.substring(0, 7),
           message: c.commit?.message || "Commit update",
-          author: c.commit?.author?.name || c.author?.login || "Dulani",
+          author: c.commit?.author?.name || c.author?.login || owner,
           date: c.commit?.author?.date || new Date().toISOString(),
           htmlUrl: c.html_url
         }));
@@ -163,19 +163,17 @@ export class GitHubService {
       console.warn("Live commits fetch failed, falling back to simulated history:", err.message);
     }
 
-    // Default simulated commit history
     return [
-      { sha: "d34ed87", message: "Update and rename workflows to .github/workflows/deploy.yml", author: "DulaniLakmali", date: new Date().toISOString() },
-      { sha: "7f9a2c1", message: "feat(ai-agent): add autonomous DAG planner and risk classifier", author: "Dulani Maduwanthi", date: new Date(Date.now() - 3600000).toISOString() },
-      { sha: "8b1c4e9", message: "ci(github-actions): integrate automated test suite for TC001-TC007", author: "Weerasooriya T.V.M.", date: new Date(Date.now() - 7200000).toISOString() },
-      { sha: "3d5f1a2", message: "security(sast): add DevSecOps container compliance scanner", author: "Dayananda I.A.", date: new Date(Date.now() - 14400000).toISOString() }
+      { sha: "41617df", message: "ci: add GitHub Actions multi-stage CI/CD pipeline", author: owner, date: new Date().toISOString() },
+      { sha: "7462497", message: "fix(ui): elevate PromQL query runner and live result cards", author: owner, date: new Date(Date.now() - 1800000).toISOString() },
+      { sha: "9af86a2", message: "feat(monitoring): implement real Prometheus metrics exporter and Grafana stack", author: owner, date: new Date(Date.now() - 3600000).toISOString() }
     ];
   }
 
   /**
    * Fetch GitHub Actions workflows
    */
-  static async getWorkflows(owner, repo, reqToken) {
+  static async getWorkflows(owner = DEFAULT_OWNER, repo = DEFAULT_REPO, reqToken) {
     const token = this.getToken(reqToken);
 
     try {
@@ -198,16 +196,116 @@ export class GitHubService {
     }
 
     return [
-      { id: 362267851, name: "DevOps Assistant Deployment", path: ".github/workflows/deploy.yml", state: "active" },
-      { id: 102, name: "Automated Security SAST & Linting", path: ".github/workflows/security.yml", state: "active" },
-      { id: 103, name: "Chapter 6 Evaluation Benchmark Suite", path: ".github/workflows/test.yml", state: "active" }
+      { id: 365888512, name: "Smart DevOps Assistant CI/CD Pipeline", path: ".github/workflows/ci.yml", state: "active" },
+      { id: 362267851, name: "DevOps Assistant Deployment", path: ".github/workflows/deploy.yml", state: "active" }
     ];
+  }
+
+  /**
+   * Fetch live GitHub Actions workflow runs
+   */
+  static async getWorkflowRuns(owner = DEFAULT_OWNER, repo = DEFAULT_REPO, reqToken) {
+    const token = this.getToken(reqToken);
+
+    try {
+      const res = await axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs?per_page=15`, {
+        headers: this.getHeaders(token),
+        timeout: 8000
+      });
+
+      if (res.data?.workflow_runs && Array.isArray(res.data.workflow_runs)) {
+        return {
+          isLive: true,
+          runs: res.data.workflow_runs.map((r) => ({
+            id: r.id,
+            name: r.name || "CI/CD Pipeline",
+            workflowId: r.workflow_id,
+            headBranch: r.head_branch || "main",
+            headSha: (r.head_sha || "").substring(0, 7),
+            displayTitle: r.display_title || r.head_commit?.message || "Autonomous pipeline run",
+            author: r.actor?.login || owner,
+            authorAvatar: r.actor?.avatar_url,
+            status: r.status, // "queued" | "in_progress" | "completed"
+            conclusion: r.conclusion, // "success" | "failure" | "cancelled" | null
+            createdAt: r.created_at,
+            updatedAt: r.updated_at,
+            runNumber: r.run_number,
+            htmlUrl: r.html_url,
+            event: r.event
+          }))
+        };
+      }
+    } catch (err) {
+      console.warn("Live workflow runs fetch failed, falling back to simulated runs:", err.message);
+    }
+
+    return {
+      isLive: false,
+      runs: []
+    };
+  }
+
+  /**
+   * Fetch jobs and steps for a specific workflow run
+   */
+  static async getRunJobs(owner = DEFAULT_OWNER, repo = DEFAULT_REPO, runId, reqToken) {
+    const token = this.getToken(reqToken);
+
+    try {
+      const res = await axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs`, {
+        headers: this.getHeaders(token),
+        timeout: 8000
+      });
+
+      if (res.data?.jobs && Array.isArray(res.data.jobs)) {
+        return res.data.jobs.map((j) => ({
+          id: j.id,
+          name: j.name,
+          status: j.status,
+          conclusion: j.conclusion,
+          startedAt: j.started_at,
+          completedAt: j.completed_at,
+          htmlUrl: j.html_url,
+          steps: (j.steps || []).map((s) => ({
+            name: s.name,
+            status: s.status,
+            conclusion: s.conclusion,
+            number: s.number,
+            startedAt: s.started_at,
+            completedAt: s.completed_at
+          }))
+        }));
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch jobs for run ${runId}:`, err.message);
+    }
+
+    return [];
+  }
+
+  /**
+   * Fetch raw logs for a specific job from GitHub runner
+   */
+  static async getJobLogs(owner = DEFAULT_OWNER, repo = DEFAULT_REPO, jobId, reqToken) {
+    const token = this.getToken(reqToken);
+
+    try {
+      const res = await axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/jobs/${jobId}/logs`, {
+        headers: this.getHeaders(token),
+        responseType: "text",
+        timeout: 10000
+      });
+
+      return res.data || "No logs available for this job.";
+    } catch (err) {
+      return `Unable to retrieve runner logs: ${err.response?.data?.message || err.message}`;
+    }
   }
 
   /**
    * Trigger real GitHub Actions workflow dispatch
    */
-  static async triggerWorkflowDispatch(owner, repo, workflowId, ref = "main", reqToken) {
+  static async triggerWorkflowDispatch(owner = DEFAULT_OWNER, repo = DEFAULT_REPO, workflowId, ref = "main", reqToken) {
     const token = this.getToken(reqToken);
 
     if (token) {
@@ -221,7 +319,11 @@ export class GitHubService {
         return {
           success: true,
           isLive: true,
-          message: `Successfully triggered GitHub Actions workflow dispatch on branch '${ref}'.`
+          owner,
+          repo,
+          ref,
+          workflowId,
+          message: `Successfully triggered GitHub Actions workflow dispatch on '${owner}/${repo}' [branch: '${ref}'].`
         };
       } catch (err) {
         return {

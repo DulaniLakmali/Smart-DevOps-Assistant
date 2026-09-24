@@ -1,6 +1,9 @@
+import { GitHubService, DEFAULT_OWNER, DEFAULT_REPO } from "./githubService.js";
+
 /**
  * CI/CD Pipeline Automation Service (Chapter 5.1.4 & Chapter 6.3.2 TC002)
- * Simulates and executes GitHub Actions workflows with stage-by-stage progression.
+ * Bridges directly to Real GitHub Actions for live cloud builds, stages, and logs,
+ * while maintaining a high-fidelity local simulation sandbox.
  */
 
 let activePipelines = [
@@ -12,6 +15,7 @@ let activePipelines = [
     commitMsg: "feat(auth): add OAuth2 and MFA verification",
     status: "success",
     duration: "2m 14s",
+    source: "SIMULATED",
     triggeredAt: new Date(Date.now() - 3600000).toISOString(),
     stages: [
       { name: "Code Checkout", status: "success", duration: "4s", logs: "Fetched 14 files at commit 7f9a2c1" },
@@ -30,6 +34,7 @@ let activePipelines = [
     commitMsg: "refactor(api): database pooling update",
     status: "failed",
     duration: "1m 02s",
+    source: "SIMULATED",
     triggeredAt: new Date(Date.now() - 14400000).toISOString(),
     stages: [
       { name: "Code Checkout", status: "success", duration: "3s", logs: "Fetched 22 files" },
@@ -43,11 +48,155 @@ let activePipelines = [
 ];
 
 export class CIService {
-  static getPipelines() {
-    return activePipelines;
+  /**
+   * Retrieve pipelines list - merges real GitHub Actions runs with simulation sandbox
+   */
+  static async getPipelines(mode = "auto", reqToken = null, owner = DEFAULT_OWNER, repo = DEFAULT_REPO) {
+    if (mode === "simulated") {
+      return { isLive: false, mode: "simulated", pipelines: activePipelines };
+    }
+
+    // Try fetching real GitHub Actions runs
+    try {
+      const realRunsData = await GitHubService.getWorkflowRuns(owner, repo, reqToken);
+      if (realRunsData.isLive && realRunsData.runs.length > 0) {
+        const livePipelines = realRunsData.runs.map((r) => ({
+          id: String(r.id),
+          name: r.name,
+          branch: r.headBranch,
+          commit: r.headSha,
+          commitMsg: r.displayTitle,
+          status: r.status === "completed" ? (r.conclusion === "success" ? "success" : "failed") : "running",
+          rawStatus: r.status,
+          rawConclusion: r.conclusion,
+          author: r.author,
+          authorAvatar: r.authorAvatar,
+          duration: r.status === "completed" ? "Completed" : "Running...",
+          triggeredAt: r.createdAt,
+          htmlUrl: r.htmlUrl,
+          runNumber: r.runNumber,
+          source: "GITHUB_ACTIONS",
+          owner,
+          repo
+        }));
+
+        return {
+          isLive: true,
+          mode: "real",
+          owner,
+          repo,
+          pipelines: livePipelines
+        };
+      }
+    } catch (err) {
+      console.warn("Real GitHub Actions fetch failed:", err.message);
+    }
+
+    return {
+      isLive: false,
+      mode: "simulated",
+      owner,
+      repo,
+      pipelines: activePipelines
+    };
   }
 
-  static async triggerPipeline(pipelineName = "smart-devops-ci", io = null) {
+  /**
+   * Fetch real jobs and steps for a specific pipeline run
+   */
+  static async getRunJobs(runId, reqToken = null, owner = DEFAULT_OWNER, repo = DEFAULT_REPO) {
+    // Check if it's a simulated run
+    const sim = activePipelines.find((p) => p.id === runId);
+    if (sim) {
+      return {
+        isLive: false,
+        runId,
+        jobs: [{
+          id: sim.id,
+          name: sim.name,
+          status: sim.status,
+          steps: sim.stages.map((s, idx) => ({
+            number: idx + 1,
+            name: s.name,
+            status: s.status === "success" ? "completed" : s.status,
+            conclusion: s.status,
+            duration: s.duration,
+            logs: s.logs
+          }))
+        }]
+      };
+    }
+
+    // Fetch real GitHub Actions jobs and steps
+    const jobs = await GitHubService.getRunJobs(owner, repo, runId, reqToken);
+    return {
+      isLive: true,
+      runId,
+      owner,
+      repo,
+      jobs
+    };
+  }
+
+  /**
+   * Fetch real raw terminal logs for a job
+   */
+  static async getJobLogs(jobId, reqToken = null, owner = DEFAULT_OWNER, repo = DEFAULT_REPO) {
+    // Check if it's simulated
+    const sim = activePipelines.find((p) => p.id === jobId);
+    if (sim) {
+      return sim.stages.map((s) => `[${s.status.toUpperCase()}] ${s.name} (${s.duration})\n  ${s.logs}`).join("\n\n");
+    }
+
+    return await GitHubService.getJobLogs(owner, repo, jobId, reqToken);
+  }
+
+  /**
+   * Trigger a pipeline - supports both real GitHub Actions dispatch and simulated runner
+   */
+  static async triggerPipeline(pipelineName = "smart-devops-ci", io = null, reqToken = null, options = {}) {
+    const mode = options.mode || "auto";
+    const owner = options.owner || DEFAULT_OWNER;
+    const repo = options.repo || DEFAULT_REPO;
+    const ref = options.ref || "main";
+    const workflowId = options.workflowId || "ci.yml";
+
+    const token = GitHubService.getToken(reqToken);
+
+    // If real mode requested, trigger real GitHub Actions dispatch
+    if (mode === "real" && token) {
+      const dispatchResult = await GitHubService.triggerWorkflowDispatch(owner, repo, workflowId, ref, token);
+
+      if (dispatchResult.success) {
+        const livePipeline = {
+          id: `gh-${Date.now().toString().slice(-6)}`,
+          name: pipelineName || "Smart DevOps Assistant CI/CD Pipeline",
+          branch: ref,
+          commit: "HEAD",
+          commitMsg: `Dispatched via Smart DevOps Assistant to ${owner}/${repo}`,
+          status: "running",
+          duration: "Queued...",
+          source: "GITHUB_ACTIONS",
+          owner,
+          repo,
+          triggeredAt: new Date().toISOString(),
+          stages: [
+            { name: "Code Checkout", status: "running", duration: "...", logs: "GitHub Actions runner initializing..." },
+            { name: "Set up Node.js Runtime", status: "pending", duration: "-", logs: "" },
+            { name: "Install Backend Dependencies", status: "pending", duration: "-", logs: "" },
+            { name: "Run Evaluation Benchmark Tests", status: "pending", duration: "-", logs: "" },
+            { name: "Install Frontend Dependencies", status: "pending", duration: "-", logs: "" },
+            { name: "Build Frontend Production Bundle", status: "pending", duration: "-", logs: "" },
+            { name: "Container & DevSecOps Validation", status: "pending", duration: "-", logs: "" }
+          ]
+        };
+
+        if (io) io.emit("ci_pipeline_update", livePipeline);
+        return livePipeline;
+      }
+    }
+
+    // Default: High-fidelity simulated runner (Chapter 6 TC002)
     const pipelineId = `pipe-${Date.now().toString().slice(-4)}`;
     const newPipeline = {
       id: pipelineId,
@@ -57,6 +206,7 @@ export class CIService {
       commitMsg: "Auto-triggered by Smart DevOps Assistant Agent",
       status: "running",
       duration: "running...",
+      source: "SIMULATED",
       triggeredAt: new Date().toISOString(),
       stages: [
         { name: "Code Checkout", status: "pending", duration: "-", logs: "" },
