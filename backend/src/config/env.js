@@ -21,6 +21,11 @@ export const config = {
   // Database Path
   DB_PATH: process.env.DB_PATH || path.resolve(__dirname, "../../devops_assistant.sqlite"),
   
+  // GitHub Integration
+  GITHUB_TOKEN: process.env.GITHUB_TOKEN || "",
+  GITHUB_DEFAULT_OWNER: process.env.GITHUB_DEFAULT_OWNER || "DulaniLakmali",
+  GITHUB_DEFAULT_REPO: process.env.GITHUB_DEFAULT_REPO || "Smart-DevOps-Assistant",
+  
   // Thresholds (from Chapter 3 constraints)
   THRESHOLDS: {
     CPU_WARNING: 85,    // CPU > 85%
