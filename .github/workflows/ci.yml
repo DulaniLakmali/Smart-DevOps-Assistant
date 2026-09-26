@@ -29,9 +29,9 @@ jobs:
           echo "📦 Installing backend packages and prom-client..."
           npm --prefix backend install
 
-      - name: "4. Run Evaluation Benchmark Tests (TC001-TC008)"
+      - name: "4. Run Evaluation Benchmark Tests (TC001-TC009)"
         run: |
-          echo "🧪 Running Chapter 6 Test Suite..."
+          echo "🧪 Running Chapter 6 Test Suite (TC001-TC009)..."
           npm --prefix backend test
 
       - name: "5. Install Frontend Dependencies"
